@@ -7,7 +7,88 @@ from torch.utils.data import Dataset, DataLoader
 import torchvision.transforms as transforms
 from scipy.signal import medfilt, iirnotch, filtfilt, butter, resample
 from util import filter_bandpass
+import xmltodict
 
+class UKB_Dataset(Dataset):
+    def __init__(self, data_dir, labels_df, transform=None):
+        """
+        Args:
+            data_dir (str): Directory path containing the numpy data files. -> "/mnt/project/Bulk/Electrocardiogram/Resting/"
+            labels_df (DataFrame): DataFrame containing the annotations.
+            transform (callable, optional): Optional transform to be applied on a sample.
+        """
+        self.labels_df = labels_df
+        self.transform = transform
+        self.data_dir = data_dir
+        self.input_leads = ['I', 'II', 'III', 'aVR', 'aVL', 'aVF', 'V1', 'V2', 'V3', 'V4', 'V5', 'V6']
+        self.fs = 5000 # length of data, 5000 = 500Hz * 10s
+
+    def __len__(self):
+        return len(self.labels_df)
+
+    def z_score_normalization(self,signal):
+        return (signal - np.mean(signal)) / (np.std(signal) +1e-8) 
+
+    def check_nan_in_array(self, arr):
+        contains_nan = np.isnan(arr).any()
+        return contains_nan
+    
+    def extract_waveform_from_xml(self, xml_path):
+        """
+        Extract ECG waveform from xml and save as numpy array with shape=[5000,12,1] ([time, leads, 1]).
+        The voltage unit should be in 1 mv/unit and the sampling rate should be 500/second (total 10 second).
+        The leads should be ordered as follow I, II, III, aVR, aVL, aVF, V1, V2, V3, V4, V5, V6.
+        """
+        with open(xml_path, 'rb') as fd:
+            xml_dict = xmltodict.parse(fd.read().decode('utf8'))
+        
+        ukb_pt_id = xml_path.split("/")[-1].split(".")[0] #xmlfile.split("/")[-1].split("_")[0]
+        xml_dict = xml_dict['CardiologyXML']
+        
+        #need to instantiate leads in the proper order for the model
+        lead_order = ['I', 'II', 'III', 'aVR', 'aVL', 'aVF', 'V1', 'V2', 'V3', 'V4', 'V5', 'V6']
+        lead_data =  dict.fromkeys(lead_order)
+        for lead_num, lead in enumerate(xml_dict['StripData']['WaveformData']):
+            lead_id = lead["@lead"]
+            waveform_data = np.array([np.int16(x.strip()) for x in xml_dict['StripData']['WaveformData'][lead_num]["#text"].split(",")])
+            lead_data[lead_id] = waveform_data
+
+        # now construct and reshape the array
+        # converting the dictionary to an np.array
+        temp = []
+        for key,value in lead_data.items():
+            temp.append(value)
+
+        # Shape is [leads, time]
+        ecg_array = np.array(temp)
+        
+        # Here is a check to make sure all the model inputs are the right shape
+        assert ecg_array.shape == (12, 5000), "ecg_array is shape {} not (12, 5000)".format(ecg_array.shape)
+        
+        return ecg_array
+
+    def __getitem__(self, idx):
+        if torch.is_tensor(idx):
+            idx = idx.tolist()
+        result = 0
+        xml_file_name = str(self.labels_df.iloc[idx, 1])
+        labels = self.labels_df.iloc[idx, -1]
+        labels = labels.astype(np.float32)
+        data = self.extract_waveform_from_xml(self.data_dir + xml_file_name)
+        data = np.nan_to_num(data, nan=0)
+        data = data.squeeze(0) 
+        data = np.transpose(data,  (1, 0))
+        data = filter_bandpass(data, 500) 
+        signal = self.z_score_normalization(data)
+        signal = torch.FloatTensor(signal)
+
+        # Convert to torch tensors
+        labels = torch.tensor(labels, dtype=torch.float)
+        if labels.dim() == 0:  
+            labels = labels.unsqueeze(0)
+        elif labels.dim() == 1:  
+            labels = labels.unsqueeze(1)
+        return signal, labels     
 
 class LVEF_12lead_cls_Dataset(Dataset):
     def __init__(self, ecg_path, labels_df, transform=None):
