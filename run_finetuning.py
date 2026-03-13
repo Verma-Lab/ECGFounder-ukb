@@ -10,7 +10,6 @@ import torch.nn as nn
 import torch.optim as optim
 import torch.nn.functional as F
 from torch.utils.data import DataLoader
-import json
 from util import save_checkpoint, save_reg_checkpoint, my_eval_with_dynamic_thresh
 from finetune_model import ft_12lead_ECGFounder, ft_1lead_ECGFounder
 from sklearn.model_selection import train_test_split
@@ -121,11 +120,11 @@ batch_size = 256
 lr = 1e-4
 weight_decay = 1e-5
 early_stop_lr = 1e-5
-Epochs = 3
-df_label_path = '/opt/notebooks/cm_var_labels_ecgfounder.tsv'
-ecg_path = '/mnt/project/Bulk/Electrocardiogram/Resting/'
+Epochs = 5
+df_label_path = 'cm_var_labels_ecgfounder.tsv'
+ecg_path = './' #'/mnt/project/Bulk/Electrocardiogram/Resting/'
 tasks = ['has_cm_var']
-saved_dir = '/opt/notebooks/results/eval_cm/'
+saved_dir = './'
 
 device = torch.device('cuda:{}'.format(gpu_id) if torch.cuda.is_available() else 'cpu')
 
@@ -133,9 +132,9 @@ n_classes = len(tasks)
 
 ECGdataset = UKB_Dataset
 pth = './checkpoint/12_lead_ECGFounder.pth'
-model = ft_12lead_ECGFounder(device, pth, n_classes,linear_prob=False)
+model = ft_12lead_ECGFounder(device, pth, n_classes,linear_prob=True)
 
-df_label = pd.read_csv(df_label_path, sep="\t")
+df_label = pd.read_csv(df_label_path, sep="\t").sample(5000)
 # Splitting the dataset into train, validation, and test sets
 
 train_df, test_df = train_test_split(df_label, test_size=0.2, shuffle=False)

@@ -71,11 +71,11 @@ class UKB_Dataset(Dataset):
     def __getitem__(self, idx):
         if torch.is_tensor(idx):
             idx = idx.tolist()
-        result = 0
-        xml_file_name = str(self.labels_df.iloc[idx, 1])
+            
+        wave_file_path = str(self.labels_df.iloc[idx]["npy_path"])
         labels = self.labels_df.iloc[idx, -1]
         labels = labels.astype(np.float32)
-        data = self.extract_waveform_from_xml(self.data_dir + xml_file_name)
+        data = np.load(wave_file_path) #self.extract_waveform_from_xml(self.data_dir + xml_file_name)
         data = np.nan_to_num(data, nan=0)
         data = data.squeeze(0)
         data = np.transpose(data,  (1, 0))
