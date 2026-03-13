@@ -60,10 +60,11 @@ class UKB_Dataset(Dataset):
             temp.append(value)
 
         # Shape is [leads, time]
-        ecg_array = np.array(temp)
+        ecg_array = np.array(temp).T
+        ecg_array = np.expand_dims(ecg_array, axis=0)
         
         # Here is a check to make sure all the model inputs are the right shape
-        assert ecg_array.shape == (12, 5000), "ecg_array is shape {} not (12, 5000)".format(ecg_array.shape)
+        assert ecg_array.shape == (1, 5000, 12), "ecg_array is shape {} not (1, 5000, 12)".format(ecg_array.shape)
         
         return ecg_array
 
@@ -76,7 +77,7 @@ class UKB_Dataset(Dataset):
         labels = labels.astype(np.float32)
         data = self.extract_waveform_from_xml(self.data_dir + xml_file_name)
         data = np.nan_to_num(data, nan=0)
-        data = data.squeeze(0) 
+        data = data.squeeze(0)
         data = np.transpose(data,  (1, 0))
         data = filter_bandpass(data, 500) 
         signal = self.z_score_normalization(data)
