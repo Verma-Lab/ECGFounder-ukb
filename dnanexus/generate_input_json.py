@@ -3,7 +3,7 @@ import sys
 input_paths = sys.argv[1]
 
 # Specify the command to run in Swiss Army Knife
-cmd='for f in *.tar.gz; do tar -xzf "$f"; done; python run_finetuning.py'
+cmd='for f in *.tar.gz; do tar -xzf $f; done; python run_finetuning.py'
 
 # Generate a json file with the list of input files, bash command, docker image, and other parameters
 json_snippets = []
