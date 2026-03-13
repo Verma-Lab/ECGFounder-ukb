@@ -2,3 +2,6 @@
 __pycache__/
 checkpoint/
 csv/.ipynb_checkpoints/
+*.json
+dnanexus/zip_waveforms/x*
+dnanexus/waveform_inputs.txt

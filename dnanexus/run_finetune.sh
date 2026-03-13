@@ -1,13 +1,13 @@
 #!/bin/bash
 
-WAVEFORM_PATH="/ecgfounder_waveforms"
+WAVEFORM_PATH="/zipped_waveforms"
 OUT_PATH="/ecgfounder_weights"
 LABELS_FILE="cm_var_labels_ecgfounder.tsv"
 
 dx mkdir -p $OUT_PATH
 
 echo "Find waveforms"
-dx find data --path "${WAVEFORM_PATH}/" --name "*.npy" --brief > waveform_inputs.txt
+dx find data --path "${WAVEFORM_PATH}/" --name "*.tar.gz" --brief > waveform_inputs.txt
 dx find data --path "/" --name "${LABELS_FILE}" --brief >> waveform_inputs.txt
 
 echo "Create input json"
