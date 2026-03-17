@@ -15,11 +15,7 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir --upgrade pip && \
     pip install --no-cache-dir -r requirements.txt
 
-COPY run_finetuning.py .
-COPY util.py .
-COPY dataset.py .
-COPY finetune_model.py .
-
-RUN wget https://huggingface.co/PKUDigitalHealth/ECGFounder/resolve/main/12_lead_ECGFounder.pth
+COPY 12_lead_ECGFounder.pth .
+COPY *.py .
 
 USER root

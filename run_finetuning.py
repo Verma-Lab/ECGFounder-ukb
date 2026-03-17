@@ -131,10 +131,10 @@ device = torch.device('cuda:{}'.format(gpu_id) if torch.cuda.is_available() else
 n_classes = len(tasks)
 
 ECGdataset = UKB_Dataset
-pth = './checkpoint/12_lead_ECGFounder.pth'
+pth = '/app/12_lead_ECGFounder.pth'
 model = ft_12lead_ECGFounder(device, pth, n_classes,linear_prob=True)
 
-df_label = pd.read_csv(df_label_path, sep="\t").sample(5000)
+df_label = pd.read_csv(df_label_path, sep="\t")
 # Splitting the dataset into train, validation, and test sets
 
 train_df, test_df = train_test_split(df_label, test_size=0.2, shuffle=False)
@@ -145,9 +145,9 @@ val_dataset = ECGdataset(data_dir=ecg_path,labels_df=val_df)
 test_dataset = ECGdataset(data_dir=ecg_path,labels_df=test_df)
 
 # Example DataLoader usage
-trainloader = DataLoader(train_dataset, batch_size=batch_size,num_workers=8, shuffle=True)
-valloader = DataLoader(test_dataset, batch_size=batch_size,num_workers=8, shuffle=False)
-testloader = DataLoader(test_dataset, batch_size=batch_size,num_workers=8, shuffle=False)
+trainloader = DataLoader(train_dataset, batch_size=batch_size,num_workers=0, shuffle=True)
+valloader = DataLoader(test_dataset, batch_size=batch_size,num_workers=0, shuffle=False)
+testloader = DataLoader(test_dataset, batch_size=batch_size,num_workers=0, shuffle=False)
 
 # linear classificaion  ->  linear_prob=True
 # full fine-tuning  ->  linear_prob=False
