@@ -1,39 +1,138 @@
 import numpy as np
 import pandas as pd
-from collections import Counter
 from tqdm import tqdm
-from sklearn.metrics import classification_report, confusion_matrix
 import os
-from shutil import copyfile
+import xmltodict
+
+from sklearn.metrics import accuracy_score, roc_auc_score, average_precision_score, f1_score, confusion_matrix, balanced_accuracy_score, roc_curve
+from sklearn.model_selection import train_test_split
+
 import torch
 import torch.nn as nn
 import torch.optim as optim
 import torch.nn.functional as F
-from torch.utils.data import DataLoader
-from util import save_checkpoint, save_reg_checkpoint, my_eval_with_dynamic_thresh
-from finetune_model import ft_12lead_ECGFounder, ft_1lead_ECGFounder, ft_12lead_UKB
-from sklearn.model_selection import train_test_split
-import torch.nn as nn
 from torch.utils.data import Dataset, DataLoader
-from dataset import UKB_Dataset
-from sklearn.metrics import accuracy_score, roc_auc_score, average_precision_score, f1_score, confusion_matrix, balanced_accuracy_score, roc_curve
 
-def find_optimal_threshold(gt, pred):
-    n_task = gt.shape[1]
-    optimal_thresholds = []
 
-    for i in range(n_task):
-        best_ba = -1  
-        best_thresh = 0.5  
-        for thresh in np.linspace(0.01, 0.99, 99):  
-            pred_labels = (pred[:, i] > thresh).astype(int)
-            ba = balanced_accuracy_score(gt[:, i], pred_labels)  
-            if ba > best_ba:
-                best_ba = ba
-                best_thresh = thresh
-        optimal_thresholds.append(best_thresh)
+from util import filter_bandpass, save_checkpoint, find_optimal_threshold
+from net1d import Net1D
 
-    return optimal_thresholds
+class UKB_Dataset(Dataset):
+    def __init__(self, data_dir, labels_df, transform=None):
+        """
+        Args:
+            data_dir (str): Directory path containing the numpy data files. -> "/mnt/project/Bulk/Electrocardiogram/Resting/"
+            labels_df (DataFrame): DataFrame containing the annotations.
+            transform (callable, optional): Optional transform to be applied on a sample.
+        """
+        self.labels_df = labels_df
+        self.transform = transform
+        self.data_dir = data_dir
+        self.input_leads = ['I', 'II', 'III', 'aVR', 'aVL', 'aVF', 'V1', 'V2', 'V3', 'V4', 'V5', 'V6']
+        self.fs = 5000 # length of data, 5000 = 500Hz * 10s
+
+    def __len__(self):
+        return len(self.labels_df)
+
+    def z_score_normalization(self,signal):
+        return (signal - np.mean(signal)) / (np.std(signal) +1e-8) 
+
+    def check_nan_in_array(self, arr):
+        contains_nan = np.isnan(arr).any()
+        return contains_nan
+    
+    def extract_waveform_from_xml(self, xml_path):
+        """
+        Extract ECG waveform from xml and save as numpy array with shape=[5000,12,1] ([time, leads, 1]).
+        The voltage unit should be in 1 mv/unit and the sampling rate should be 500/second (total 10 second).
+        The leads should be ordered as follow I, II, III, aVR, aVL, aVF, V1, V2, V3, V4, V5, V6.
+        """
+        with open(xml_path, 'rb') as fd:
+            xml_dict = xmltodict.parse(fd.read().decode('utf8'))
+        
+        ukb_pt_id = xml_path.split("/")[-1].split(".")[0] #xmlfile.split("/")[-1].split("_")[0]
+        xml_dict = xml_dict['CardiologyXML']
+        
+        #need to instantiate leads in the proper order for the model
+        lead_order = ['I', 'II', 'III', 'aVR', 'aVL', 'aVF', 'V1', 'V2', 'V3', 'V4', 'V5', 'V6']
+        lead_data =  dict.fromkeys(lead_order)
+        for lead_num, lead in enumerate(xml_dict['StripData']['WaveformData']):
+            lead_id = lead["@lead"]
+            waveform_data = np.array([np.int16(x.strip()) for x in xml_dict['StripData']['WaveformData'][lead_num]["#text"].split(",")])
+            lead_data[lead_id] = waveform_data
+
+        # now construct and reshape the array
+        # converting the dictionary to an np.array
+        temp = []
+        for key,value in lead_data.items():
+            temp.append(value)
+
+        # Shape is [leads, time]
+        ecg_array = np.array(temp).T
+        ecg_array = np.expand_dims(ecg_array, axis=0)
+        
+        # Here is a check to make sure all the model inputs are the right shape
+        assert ecg_array.shape == (1, 5000, 12), "ecg_array is shape {} not (1, 5000, 12)".format(ecg_array.shape)
+        
+        return ecg_array
+
+    def __getitem__(self, idx):
+        if torch.is_tensor(idx):
+            idx = idx.tolist()
+            
+        wave_file_path = str(self.labels_df.iloc[idx]["npy_path"])
+        labels = self.labels_df.iloc[idx, -1]
+        labels = labels.astype(np.float32)
+        data = np.load(wave_file_path) #self.extract_waveform_from_xml(self.data_dir + xml_file_name)
+        data = np.nan_to_num(data, nan=0)
+        data = data.squeeze(0)
+        data = np.transpose(data,  (1, 0))
+        data = filter_bandpass(data, 500) 
+        signal = self.z_score_normalization(data)
+        signal = torch.FloatTensor(signal)
+
+        # Convert to torch tensors
+        labels = torch.tensor(labels, dtype=torch.float)
+        if labels.dim() == 0:  
+            labels = labels.unsqueeze(0)
+        elif labels.dim() == 1:  
+            labels = labels.unsqueeze(1)
+        return signal, labels     
+
+def ft_UKB(device, pth, n_classes, linear_prob=False, dropout=False):
+    model = Net1D(
+        in_channels=12, 
+        base_filters=64, 
+        ratio=1, 
+        filter_list=[64,160,160,400,400,1024,1024],    
+        m_blocks_list=[2,2,2,3,3,4,4], 
+        kernel_size=16, 
+        stride=2, 
+        groups_width=16,
+        verbose=False, 
+        use_bn=False,
+        use_do=dropout,
+        n_classes=n_classes)
+
+    checkpoint = torch.load(pth, map_location=device)
+    state_dict = checkpoint['state_dict']
+
+    state_dict = {k: v for k, v in state_dict.items() if not k.startswith('dense.')} 
+
+    model.load_state_dict(state_dict, strict=False)
+
+    # set shape of classification head
+    model.dense = nn.Sequential(nn.Linear(model.dense.in_features, model.dense.in_features//2), nn.Linear(model.dense.in_features//2, model.dense.in_features//4), nn.Linear(model.dense.in_features//4, n_classes)).to(device)
+
+    # freezing model
+    if linear_prob == True: 
+        for name, param in model.named_parameters():
+            if 'dense' not in name:  # no freezing last layer
+                param.requires_grad = False
+
+    model.to(device)
+
+    return model
 
 def eval_model(gt, pred, thresholds):
     """
@@ -132,48 +231,43 @@ def data_metrics(loader, step="Validation", predefined_thresh=None):
     return mean_rocauc, rocaucs, sensitivities, specificities, f1, auprcs, thresh
     
 
-num_lead = 12 # 12-lead ECG or 1-lead ECG 
-
 gpu_id = 0
 batch_size = 256
 lr = 1e-4
 weight_decay = 1e-5
 early_stop_lr = 1e-5
-Epochs = 8
+epochs = 8
+freeze_conv_layers = False
+
 df_label_path = 'cm_var_labels_ecgfounder.tsv'
-ecg_path = './' #'/mnt/project/Bulk/Electrocardiogram/Resting/'
 tasks = ['has_cm_var']
-saved_dir = './'
-freeze_conv_layer = False
+n_classes = len(tasks)
+
+ecg_path = './' #'/mnt/project/Bulk/Electrocardiogram/Resting/'
+out_dir = './'
 
 device = torch.device('cuda:{}'.format(gpu_id) if torch.cuda.is_available() else 'cpu')
 
-n_classes = len(tasks)
-
-ECGdataset = UKB_Dataset
-pth = '/app/12_lead_ECGFounder.pth'
-model = ft_12lead_UKB(device, pth, n_classes,linear_prob=freeze_conv_layer)
+checkpoint_path = '/app/12_lead_ECGFounder.pth'
+model = ft_UKB(device, checkpoint_path, n_classes,linear_prob=freeze_conv_layers, dropout=True)
+# linear classificaion  ->  linear_prob=True
+# full fine-tuning  ->  linear_prob=False
 
 df_label = pd.read_csv(df_label_path, sep="\t")
-# Splitting the dataset into train, validation, and test sets
 
+# Splitting the dataset into train, validation, and test sets
 train_df, test_df = train_test_split(df_label, test_size=0.2, shuffle=False)
 val_df, test_df = train_test_split(test_df, test_size=0.5, shuffle=False)
 
-train_dataset = ECGdataset(data_dir=ecg_path,labels_df=train_df)
-val_dataset = ECGdataset(data_dir=ecg_path,labels_df=val_df)
-test_dataset = ECGdataset(data_dir=ecg_path,labels_df=test_df)
+train_dataset = UKB_Dataset(data_dir=ecg_path,labels_df=train_df)
+val_dataset = UKB_Dataset(data_dir=ecg_path,labels_df=val_df)
+test_dataset = UKB_Dataset(data_dir=ecg_path,labels_df=test_df)
 
-# Example DataLoader usage
 trainloader = DataLoader(train_dataset, batch_size=batch_size,num_workers=0, shuffle=True)
 valloader = DataLoader(val_dataset, batch_size=batch_size,num_workers=0, shuffle=False)
 testloader = DataLoader(test_dataset, batch_size=batch_size,num_workers=0, shuffle=False)
 
-# linear classificaion  ->  linear_prob=True
-# full fine-tuning  ->  linear_prob=False
-
 criterion = nn.BCEWithLogitsLoss()
-
 optimizer = optim.Adam(model.parameters(), lr=lr, weight_decay=weight_decay)
 scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, patience=10, factor=0.5, mode='max', verbose=True)
 
@@ -187,13 +281,13 @@ total_steps_per_epoch = len(trainloader)
 eval_steps = total_steps_per_epoch
 
 # Disable dropout for conv layer
-if freeze_conv_layer:
+if freeze_conv_layers:
     model.eval()
     model.dense.train()
 else:
     model.train()
 
-for epoch in range(Epochs):
+for epoch in range(epochs):
     ### train
     for batch in tqdm(trainloader,desc='Training'):
         input_x, input_y = tuple(t.to(device) for t in batch)
@@ -221,7 +315,7 @@ for epoch in range(Epochs):
             res_train, res_train_auroc, res_train_sens, res_train_spec, res_train_f1, res_train_auprc = eval_model(train_labels, train_preds, val_thresh)
             train_auroc = res_train
             
-            print(f'Epoch {epoch} step {step}, train: {train_auroc} val: {val_auroc} threshold: {val_thresh[0]}')
+            print(f'Epoch {epoch} step {step}, train: {train_auroc} val: {val_auroc} test: {test_auroc} threshold: {val_thresh[0]}')
 
             ### save model and res
             is_best = bool(val_auroc > best_val_auroc)
@@ -235,7 +329,7 @@ for epoch in range(Epochs):
                     'optimizer': optimizer.state_dict(),
                     'scheduler': scheduler.state_dict(),
                     'val_auroc': val_auroc,
-                }, saved_dir)
+                }, out_dir)
                 
             current_lr = optimizer.param_groups[0]['lr']
 
@@ -248,9 +342,9 @@ for epoch in range(Epochs):
             columns = ['Field_ID', 'val_AUROC', 'val_sensitivity', 'val_specificity', 'val_f1', 'val_auprc', 'val_thresh', 
                        'test_AUROC', 'test_sensitivity', 'test_specificity', 'test_f1', 'test_auprc', 'pos_num', 'neg_num']
             
-            df = pd.DataFrame(all_res, columns=columns)
+            results_df = pd.DataFrame(all_res, columns=columns)
 
-            df.to_csv(os.path.join(saved_dir, f'res.csv'), index=False, float_format='%.5f')
+            results_df.to_csv(os.path.join(out_dir, f'results.csv'), index=False, float_format='%.5f')
             
             scheduler.step(val_auroc)
             ### early stop
@@ -259,7 +353,7 @@ for epoch in range(Epochs):
                 print("Early stop")
                 exit()
             
-            if freeze_conv_layer:
+            if freeze_conv_layers:
                 model.dense.train() # set back to train
             else:
                 model.train()
