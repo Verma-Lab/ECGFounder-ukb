@@ -394,6 +394,107 @@ class Net1D(nn.Module):
         else:
             return out
 
+class Net1D_UKB(nn.Module):
+    """
+    
+    Input:
+        X: (n_samples, n_channel, n_length)
+        Y: (n_samples)
+        
+    Output:
+        out: (n_samples)
+        
+    params:
+        in_channels
+        base_filters
+        filter_list: list, filters for each stage
+        m_blocks_list: list, number of blocks of each stage
+        kernel_size
+        stride
+        groups_width
+        n_stages
+        n_classes
+        use_bn
+        use_do
+
+    """
+
+    def __init__(self, in_channels, base_filters, ratio, filter_list, m_blocks_list, kernel_size, stride, groups_width, n_classes, use_bn=True, use_do=True, return_features=False, verbose=False):
+        super(Net1D_UKB, self).__init__()
+        
+        self.in_channels = in_channels
+        self.base_filters = base_filters
+        self.ratio = ratio
+        self.filter_list = filter_list
+        self.m_blocks_list = m_blocks_list
+        self.kernel_size = kernel_size
+        self.stride = stride
+        self.groups_width = groups_width
+        self.n_stages = len(filter_list)
+        self.n_classes = n_classes
+        self.use_bn = use_bn
+        self.use_do = use_do
+        self.return_features = return_features
+        self.verbose = verbose
+
+        # first conv
+        self.first_conv = MyConv1dPadSame(
+            in_channels=in_channels, 
+            out_channels=self.base_filters, 
+            kernel_size=self.kernel_size, 
+            stride=2)
+        self.first_bn = nn.BatchNorm1d(base_filters)
+        self.first_activation = Swish()
+
+        # stages
+        self.stage_list = nn.ModuleList()
+        in_channels = self.base_filters
+        for i_stage in range(self.n_stages):
+
+            out_channels = self.filter_list[i_stage]
+            m_blocks = self.m_blocks_list[i_stage]
+            tmp_stage = BasicStage(
+                in_channels=in_channels, 
+                out_channels=out_channels, 
+                ratio=self.ratio, 
+                kernel_size=self.kernel_size, 
+                stride=self.stride, 
+                groups=out_channels//self.groups_width, 
+                i_stage=i_stage,
+                m_blocks=m_blocks, 
+                use_bn=self.use_bn, 
+                use_do=self.use_do, 
+                verbose=self.verbose)
+            self.stage_list.append(tmp_stage)
+            in_channels = out_channels
+
+        # final prediction
+        self.dense = nn.Linear(in_channels, n_classes)
+        
+    def forward(self, x):
+        
+        out = x
+        
+        # first conv
+        out = self.first_conv(out)
+        if self.use_bn:
+            out = self.first_bn(out)
+        out = self.first_activation(out)
+        
+        # stages
+        for i_stage in range(self.n_stages):
+            net = self.stage_list[i_stage]
+            out = net(out)
+
+        # final prediction
+        deep_features = out.mean(-1)
+        out = self.dense(deep_features)
+
+        if self.return_features:
+            return out, deep_features
+        else:
+            return out
+
 if __name__ == "__main__":
   model = Net1D(
       in_channels=12, 

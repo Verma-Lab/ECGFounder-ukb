@@ -1,7 +1,7 @@
 #!/bin/bash
 
 WAVEFORM_PATH="/zipped_waveforms"
-OUT_PATH="/ecgfounder_weights"
+OUT_PATH="/ecgfounder_weights/new_model"
 LABELS_FILE="cm_var_labels_ecgfounder.tsv"
 
 dx mkdir -p $OUT_PATH
@@ -18,6 +18,7 @@ dx run app-swiss-army-knife \
     --name "Finetune ECGFounder" \
     --instance-type mem2_ssd2_gpu1_v2_x8 \
     --priority high \
+    --ignore-reuse \
     -f ecgfounder_finetune.json \
     --destination "${OUT_PATH}/" \
     -y --brief
