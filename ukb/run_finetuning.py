@@ -14,7 +14,7 @@ import torch.nn.functional as F
 from torch.utils.data import Dataset, DataLoader
 
 
-from util import filter_bandpass, save_checkpoint, find_optimal_threshold
+from util import filter_bandpass, save_checkpoint, find_optimal_threshold, find_optimal_threshold_f2
 from net1d import Net1D
 
 class UKB_Dataset(Dataset):
@@ -226,7 +226,7 @@ def data_metrics(loader, step="Validation", predefined_thresh=None):
     all_pred_prob = np.concatenate(all_pred_prob)
     all_input_labels = np.concatenate(all_input_labels)
     all_input_labels = np.array(all_input_labels)
-    thresh = find_optimal_threshold(all_input_labels, all_pred_prob) if not predefined_thresh else predefined_thresh
+    thresh = find_optimal_threshold_f2(all_input_labels, all_pred_prob) if not predefined_thresh else predefined_thresh
     mean_rocauc, rocaucs, sensitivities, specificities, f1, auprcs = eval_model(all_input_labels, all_pred_prob, thresh)
     return mean_rocauc, rocaucs, sensitivities, specificities, f1, auprcs, thresh
     
@@ -237,7 +237,7 @@ lr = 1e-4
 weight_decay = 1e-5
 early_stop_lr = 1e-5
 epochs = 8
-freeze_conv_layers = False
+freeze_conv_layers = True
 
 df_label_path = 'cm_var_labels_ecgfounder.tsv'
 tasks = ['has_cm_var']
@@ -267,7 +267,8 @@ trainloader = DataLoader(train_dataset, batch_size=batch_size,num_workers=0, shu
 valloader = DataLoader(val_dataset, batch_size=batch_size,num_workers=0, shuffle=False)
 testloader = DataLoader(test_dataset, batch_size=batch_size,num_workers=0, shuffle=False)
 
-criterion = nn.BCEWithLogitsLoss()
+case_ctrl_ratio = torch.tensor([df_label['has_cm_var'].sum() / (len(df_label) - df_label['has_cm_var'].sum())])
+criterion = nn.BCEWithLogitsLoss(pos_weight=case_ctrl_ratio)
 optimizer = optim.Adam(model.parameters(), lr=lr, weight_decay=weight_decay)
 scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, patience=10, factor=0.5, mode='max', verbose=True)
 

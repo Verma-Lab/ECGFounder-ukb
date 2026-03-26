@@ -1,7 +1,7 @@
 #!/bin/bash
 
 WAVEFORM_PATH="/zipped_waveforms"
-OUT_PATH="/ecgfounder_weights/new_model"
+OUT_PATH="/ecgfounder_weights/new_model/frozen_weighted"
 LABELS_FILE="cm_var_labels_ecgfounder.tsv"
 
 dx mkdir -p $OUT_PATH

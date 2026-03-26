@@ -7,7 +7,7 @@ from time import gmtime, strftime
 from matplotlib import pyplot as plt
 from collections import Counter, OrderedDict
 from sklearn.model_selection import train_test_split
-from sklearn.metrics import accuracy_score, roc_auc_score, average_precision_score, f1_score, confusion_matrix, balanced_accuracy_score, roc_curve
+from sklearn.metrics import accuracy_score, roc_auc_score, average_precision_score, f1_score, confusion_matrix, balanced_accuracy_score, roc_curve, fbeta_score
 from sklearn.utils import resample
 from sklearn.metrics import average_precision_score
 from scipy.signal import medfilt, iirnotch, filtfilt, butter, resample
@@ -182,6 +182,23 @@ def find_optimal_threshold(gt, pred):
             ba = balanced_accuracy_score(gt[:, i], pred_labels)  
             if ba > best_ba:
                 best_ba = ba
+                best_thresh = thresh
+        optimal_thresholds.append(best_thresh)
+
+    return optimal_thresholds
+
+def find_optimal_threshold_f2(gt, pred):
+    n_task = gt.shape[1]
+    optimal_thresholds = []
+
+    for i in range(n_task):
+        best_f2 = -1  
+        best_thresh = 0.5  
+        for thresh in np.linspace(0.01, 0.99, 99):  
+            pred_labels = (pred[:, i] > thresh).astype(int)
+            f2score = fbeta_score(gt[:, i], pred_labels, beta=2)  
+            if f2score > best_f2:
+                best_f2 = f2score
                 best_thresh = thresh
         optimal_thresholds.append(best_thresh)
 
