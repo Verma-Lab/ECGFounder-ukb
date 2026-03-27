@@ -226,7 +226,7 @@ def data_metrics(loader, step="Validation", predefined_thresh=None):
     all_pred_prob = np.concatenate(all_pred_prob)
     all_input_labels = np.concatenate(all_input_labels)
     all_input_labels = np.array(all_input_labels)
-    thresh = find_optimal_threshold_f2(all_input_labels, all_pred_prob) if not predefined_thresh else predefined_thresh
+    thresh = 0.5 #find_optimal_threshold_f2(all_input_labels, all_pred_prob) if not predefined_thresh else predefined_thresh
     mean_rocauc, rocaucs, sensitivities, specificities, f1, auprcs = eval_model(all_input_labels, all_pred_prob, thresh)
     return mean_rocauc, rocaucs, sensitivities, specificities, f1, auprcs, thresh
     
